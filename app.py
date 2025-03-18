@@ -9,6 +9,7 @@ import time
 from kakao_msg_llm import process_csv, chatbot_category
 
 st.set_page_config(page_title="카카오톡 CS 분석", layout="wide")
+font_path = os.path.join(os.getcwd(), "assets", "fonts", "NotoSansKR-VariableFont_wght.ttf")
 
 # 📊 카카오톡 채널 C/S 채널 csv 파일들의 압축 폴더 업로드
 st.title("📦 카카오톡 채널 C/S 채널 csv 파일들의 압축 폴더를 업로드 해주세요")
@@ -117,7 +118,7 @@ if uploaded_file is not None:
 
         # 워드클라우드 생성
         wordcloud = WordCloud(
-            font_path='/Library/Fonts/AppleGothic.ttf',  # Mac에서 AppleGothic 폰트 경로 예시
+            font_path=font_path,  # Mac에서 AppleGothic 폰트 경로 예시
             width=1000,
             height=600,
             background_color='white'
