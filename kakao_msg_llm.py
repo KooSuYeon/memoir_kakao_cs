@@ -1,4 +1,5 @@
 import os
+import zipfile
 import pandas as pd
 from dotenv import load_dotenv
 import openai
@@ -6,6 +7,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
+import shutil
 
 
 # 개인정보 저장 방지를 위한 방법 (로깅 비활성화)
@@ -18,6 +20,14 @@ class Keywords(BaseModel):
     description: list = Field(description="AI가 생성한 키워드들")
 
 
+chatbot_dict_not_use = {"메모어 신청 관련": 0, "슬랙 초대링크 관련": 0, "참가 신청 메시지 관련": 0, "슬랙 이메일 변경": 0,
+"모집 기간 관련": 0, "보증금 관련": 0,"멤버쉽/보증금 제도 관련": 0, "멤버쉽/보증금 확인 관련": 0, "회고 및 댓글 관련": 0, "메모어 슬랙 사용 가이드": 0,
+"회고/댓글 제출 가이드": 0,  "모임 관련": 0, "모임 편성 관련": 0, "모임 변경 관련":0, "오프라인 모임 장소 관련": 0, "오프라인 및 온라인 비용": 0, "취소/환불 관련": 0, "메모어라이브 관련" : 0,
+"신청 확인":0, "참가 조건":0, "메모어아카이빙 관련": 0}
+
+# 모집 기간 관련, 슬랙 이메일 변경, 슬랙 초대링크 관련
+
+chatbot_options = list(chatbot_dict_not_use.keys())
 
 load_dotenv()
 api_key = os.getenv("OPEN_API_KEY")
@@ -33,6 +43,10 @@ prompt = ChatPromptTemplate.from_messages(
         키워드의 개수는 전체 문장의 50%로 설정해야 해.
         예를 들어, 10줄의 대화가 주어지면 5개의 키워드를 추출해야 해.
         결과는 배열 형식으로 내보내줘.
+        또한, 구체적인 날짜 (예: 4월 21일, 2025년 4월 21일)는 키워드에서 제외해야 해.
+        날짜를 제외한 나머지 중요한 키워드만 추출해줘.
+        추가로, 상투적인 표현인 "도와드렸습니다", "상관없으니", "문의해주세요" 등은 키워드로 포함되지 않도록 제외해줘.
+        서비스 이름인 "메모어"도 들어가지 않도록 제외해줘.
         """),
        ("user", "#Format: {format_instructions}\n\n#Question: {question}"),
     ]
@@ -58,15 +72,28 @@ def process_csv(file_path):
     df = pd.read_csv(file_path, encoding="utf-8", encoding_errors="replace", header=0)
     df = pd.DataFrame(df)
 
-    user_messages = df[df["USER"] != "memoir(메뉴)"]["MESSAGE"]
+    # "USER"이 "memoir(메뉴)"인 메시지와 "MESSAGE" 내용이 chatbot_options에 포함된 메시지 제외
+    # 또한 "USER"이 "memoir"이고 "MESSAGE"가 "[메모어 XX기 X주차]" 형식으로 시작하는 메시지 제외
+    filtered_df = df[
+        ~(df["USER"] == "memoir(메뉴)") &  # "USER"이 "memoir(메뉴)"인 메시지 제외
+        ~df["MESSAGE"].isin(chatbot_options) &  # "MESSAGE"가 chatbot_options에 있는 메시지 제외
+        ~((df["USER"] == "memoir") & 
+          (df["MESSAGE"].str.match(r"^\[메모어 \d+기 \d+주차\]")))]  # "[메모어 XX기 X주차]" 형식 제외
+
+
+    # 필터링된 메시지들 추출
+    user_messages = filtered_df["MESSAGE"]
 
     # 메시지를 "\n"으로 연결하여 하나의 문자열로 변환
     message_string = "\n".join(user_messages)
+
     # AI 모델을 통해 키워드 추출
     keyword_result = get_keyword(message_string)
 
     print(">>>>>>>>>>>>> ✅ 키워드 추출 성공 <<<<<<<<<<<<<<")
     return keyword_result
+
+# print(process_csv("memoir_조혜미.csv"))
 
 def process_files(folder):
     # 폴더 내 CSV 파일 목록 가져오기
@@ -150,3 +177,15 @@ def categorize_keywords_with_spacy(keywords):
         category_dict[matched_category].append(keyword)
 
     return category_dict
+
+def chatbot_category(file_path, chatbot_dict):
+    # CSV 파일 읽기
+    df = pd.read_csv(file_path, encoding="utf-8", encoding_errors="replace", header=0)
+    df = pd.DataFrame(df)
+
+    for message in df["MESSAGE"]:
+        if message in chatbot_options:
+            chatbot_dict[message] += 1
+
+
+    return chatbot_dict
