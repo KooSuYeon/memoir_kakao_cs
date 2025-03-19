@@ -83,7 +83,7 @@ if uploaded_file is not None:
         
         c_group_dict = group_category(chatbot_dict, c_group_dict)
 
-        print(c_group_dict)
+        # print(c_group_dict)
         st.markdown("---")
         st.text("📢 챗봇/살담 키워드 분포는 키워드의 카테고리별 분포를 시각화한 것입니다.\n챗봇의 Count의 기준은 챗봇 내 버튼 각각의 Count이며\n상담의 Count의 기준은 상담 내용에서 챗봇 내 버튼을 기준으로 분류한 것의 Count입니다.")
 
@@ -182,6 +182,7 @@ if uploaded_file is not None:
 
             # 딕셔너리를 데이터프레임으로 변환
             text_df = pd.DataFrame(list(text_dict.items()), columns=["Category", "Count"])
+            text_df = text_df[~text_df['Category'].isin(chatbot_large_options)]
 
             # Count의 총합을 계산
             t_total_count = text_df["Count"].sum()
@@ -192,7 +193,6 @@ if uploaded_file is not None:
 
             # 총합을 제외한 부분만 내림차순으로 정렬
             t_df_sorted = t_df_with_total.iloc[:-1].sort_values(by="Count", ascending=False)
-            t_df_sorted = t_df_sorted[~t_df_sorted['Category'].isin(chatbot_large_options)]
 
             # 총합 행을 맨 마지막에 추가
             t_df_sorted = pd.concat([t_df_sorted, t_total_row], ignore_index=True)
