@@ -6,7 +6,9 @@ import openai
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
+from enum import Enum
+from typing import List, Set
 import shutil
 
 
@@ -16,49 +18,134 @@ openai.api_key = os.getenv("OPEN_API_KEY")
 # Optional: API 요청과 응답을 추적하지 않도록 하는 설정
 openai.log = None  # OpenAI API 호출에서 로그를 비활성화합니다.
 
-class Keywords(BaseModel):
-    description: list = Field(description="AI가 생성한 키워드들")
-
 
 chatbot_dict_not_use = {"메모어 신청 관련": 0, "슬랙 초대링크 관련": 0, "참가 신청 메시지 관련": 0, "슬랙 이메일 변경": 0,
-"모집 기간 관련": 0, "보증금 관련": 0,"멤버쉽/보증금 제도 관련": 0, "멤버쉽/보증금 확인 관련": 0, "회고 및 댓글 관련": 0, "메모어 슬랙 사용 가이드": 0,
+"모집 기간 관련": 0, "보증금 관련": 0,"멤버쉽/보증금 제도 관련": 0, "멤버쉽/보증금 확인 관련": 0, "회고 및 댓글 작성 관련": 0, "메모어 슬랙 사용 가이드": 0,
 "회고/댓글 제출 가이드": 0,  "모임 관련": 0, "모임 편성 관련": 0, "모임 변경 관련":0, "오프라인 모임 장소 관련": 0, "오프라인 및 온라인 비용": 0, "취소/환불 관련": 0, "메모어라이브 관련" : 0,
 "신청 확인":0, "참가 조건":0, "메모어아카이빙 관련": 0}
+
+
 
 # 모집 기간 관련, 슬랙 이메일 변경, 슬랙 초대링크 관련
 
 chatbot_options = list(chatbot_dict_not_use.keys())
+chatbot_large_options = ["메모어 신청 관련", "보증금 관련", "회고 및 댓글 작성 관련", "모임 관련", "메모어라이브 관련", "취소/환불 관련", "메모어아카이빙 관련"]
+
+CategoryEnum = Enum("CategoryEnum", {opt: opt for opt in chatbot_options})
+# 중복을 제거하려면 `List`를 사용하고, 후처리로 중복 제거
+class AICategory(BaseModel):
+    category: List[CategoryEnum]
+
+# JSON 파서를 설정
+parser = JsonOutputParser(pydantic_object=AICategory)
+
+# 중복 제거 로직 추가
+def remove_duplicates(categories: List[str]) -> List[str]:
+    return list(set(categories))  # set을 이용해 중복 제거
 
 load_dotenv()
 api_key = os.getenv("OPEN_API_KEY")
-parser = JsonOutputParser(pydantic_object=Keywords)
 
 prompt = ChatPromptTemplate.from_messages(
     [
-        ("system", """
-        너는 고객 상담 내용을 분석하는 AI야. 
-        주어진 문장에서 핵심적인 키워드를 뽑아줘. 
-        키워드는 단어 또는 짧은 구 형태로 구성되어야 해.
-        키워드는 중복되지 않도록 해야 하며, 최대 20개까지만 뽑아야 해.
-        키워드의 개수는 전체 문장의 50%로 설정해야 해.
-        예를 들어, 10줄의 대화가 주어지면 5개의 키워드를 추출해야 해.
-        결과는 배열 형식으로 내보내줘.
-        또한, 구체적인 날짜 (예: 4월 21일, 2025년 4월 21일)는 키워드에서 제외해야 해.
-        날짜를 제외한 나머지 중요한 키워드만 추출해줘.
-        추가로, 상투적인 표현인 "도와드렸습니다", "상관없으니", "문의해주세요" 등은 키워드로 포함되지 않도록 제외해줘.
-        서비스 이름인 "메모어"도 들어가지 않도록 제외해줘.
+        ("system", f"""
+        너는 고객 상담 내용을 분석해 해당 내용이 어떤 범주에 속하는지 분류하는 AI야. 
+        하나의 대화에서 여러 범주가 나올 수도 있어. 하지만, 각 범주는 하나만 선택되어야 하며 중복되지 않도록 분류해야 해.
+        
+        범주는 반드시 {', '.join(chatbot_options)} 중 하나 이상이어야 하며, 
+        각 범주의 기준은 다음과 같아:
+
+        1. **메모어 신청 관련**:  
+           - 메모어 참가 신청, 신청 방법, 얼리버드 신청 관련 문의  
+           - 신청 후 절차 안내 요청  
+
+        2. **슬랙 초대링크 관련**:  
+           - 슬랙 초대 링크가 만료됨  
+           - 초대 링크를 받지 못했거나 다시 요청하는 경우  
+
+        3. **참가 신청 메시지 관련**:  
+           - 참가 신청 후 신청 여부 확인  
+           - 신청이 정상적으로 접수되었는지 확인 요청  
+
+        4. **슬랙 이메일 변경**:  
+           - 슬랙에 등록된 이메일을 변경하고 싶다는 요청  
+
+        5. **모집 기간 관련**:  
+           - 모집 일정, 신청 마감일 관련 질문  
+           - 모집이 끝났는지 여부 확인  
+
+        6. **보증금 관련**:  
+           - 보증금 금액, 납부 방법, 입금 확인 요청  
+           - 보증금 환불 관련 문의  
+
+        7. **멤버쉽/보증금 제도 관련**:  
+           - 멤버십 및 보증금 제도의 구조에 대한 설명 요청  
+           - 보증금이 어떻게 운영되는지 궁금해하는 경우  
+
+        8. **멤버쉽/보증금 확인 관련**:  
+           - 보증금이 정상적으로 납부되었는지 확인 요청  
+           - 보증금 환불 진행 여부 확인  
+
+        9. **회고 및 댓글 작성 관련**:  
+           - 회고 및 댓글을 어떻게 작성해야 하는지 질문  
+           - 회고 및 댓글 관련 제출 마감일 문의  
+
+        10. **메모어 슬랙 사용 가이드**:  
+            - 슬랙 사용법, 채널 활용 방법에 대한 질문  
+
+        11. **회고/댓글 제출 가이드**:  
+            - 회고 또는 댓글을 제출하는 방법, 일정 관련 문의  
+
+        12. **모임 관련**:  
+            - 모임의 기본적인 진행 방식, 운영 방식 질문  
+
+        13. **모임 편성 관련**:  
+            - 특정 모임에 편성되었는지 여부 확인  
+            - 모임 구성 방식에 대한 질문  
+
+        14. **모임 변경 관련**:  
+            - 신청한 모임 날짜나 시간을 변경하고 싶다는 요청  
+            - 모임을 취소하고 다른 일정으로 변경하고 싶은 경우  
+
+        15. **오프라인 모임 장소 관련**:  
+            - 오프라인 모임이 어디에서 진행되는지 질문  
+            - 장소 변경 여부 확인  
+
+        16. **오프라인 및 온라인 비용**:  
+            - 오프라인과 온라인 참가 비용 관련 문의  
+
+        17. **취소/환불 관련**:  
+            - 보증금 환불 요청, 모임 취소 후 환불 여부 질문  
+
+        18. **메모어라이브 관련**:  
+            - 메모어라이브 관련 질문  
+            - 메모어라이브 참여 방법, 일정 관련 문의  
+
+        19. **신청 확인**:  
+            - 메모어라이브 참가 신청이 정상적으로 접수되었는지 확인 요청  
+            - 본인이 신청한 메모어라이브 내역 조회 및 신청 상태 확인  
+
+        20. **참가 조건**:  
+            - 메모어라이브 참가 대상 및 필수 자격 요건 문의 
+
+        21. **메모어아카이빙 관련**:  
+            - 메모어 아카이빙(기록 저장) 관련 문의  
+
+
+        대화의 모든 내용을 고려해서, 적절한 범주를 모두 찾아야 해.
         """),
-       ("user", "#Format: {format_instructions}\n\n#Question: {question}"),
+       ("user", "#Format: {format_instructions}\n\n#Question: {question}#"),
     ]
 )
 
+parser = JsonOutputParser(pydantic_object=AICategory)
 prompt = prompt.partial(format_instructions=parser.get_format_instructions())
 
 def get_keyword(query):
 
     # 모델 초기화
     # temperature이 0에 가까울 수록 정확도가 높은 답변만을 선택함 (1에 가까울수록 랜덤성을 가미함)
-    model = ChatOpenAI(temperature=0.5, model="gpt-3.5-turbo", api_key=api_key)
+    model = ChatOpenAI(temperature=0.3, model="gpt-3.5-turbo", api_key=api_key)
 
     chain = prompt | model | parser
 
@@ -87,13 +174,19 @@ def process_csv(file_path):
     # 메시지를 "\n"으로 연결하여 하나의 문자열로 변환
     message_string = "\n".join(user_messages)
 
+    # 정제 얼마정도 되었는지 확인
+    # print(message_string)
+
     # AI 모델을 통해 키워드 추출
-    keyword_result = get_keyword(message_string)
+    keyword_result = remove_duplicates(get_keyword(message_string)["category"])
 
-    print(">>>>>>>>>>>>> ✅ 키워드 추출 성공 <<<<<<<<<<<<<<")
-    return keyword_result
+    # print("Before >>>> ", keyword_result)
+    filtered_categories = [category for category in keyword_result if category in chatbot_options]
+    # print("After >>>> ", filtered_categories)
 
-# print(process_csv("memoir_조혜미.csv"))
+    # print(">>>>>>>>>>>>> ✅ AI 키워드 추출 성공 <<<<<<<<<<<<<<")
+    return filtered_categories
+
 
 def process_files(folder):
     # 폴더 내 CSV 파일 목록 가져오기
@@ -184,8 +277,54 @@ def chatbot_category(file_path, chatbot_dict):
     df = pd.DataFrame(df)
 
     for message in df["MESSAGE"]:
-        if message in chatbot_options:
+        if (message in chatbot_options):
             chatbot_dict[message] += 1
 
 
     return chatbot_dict
+
+def text_category(file_path, text_dict):
+
+    df = pd.read_csv(file_path, encoding="utf-8", encoding_errors="replace", header=0)
+    df = pd.DataFrame(df)
+
+
+    keywords_list = process_csv(file_path)
+
+    for keywords in keywords_list:
+        if keywords in chatbot_options:
+            text_dict[keywords] += 1
+            
+
+    return text_dict
+
+# print(text_category("memoir_조혜미.csv", chatbot_dict_not_use))
+
+
+grouping = {
+    "메모어 신청 관련": ["메모어 신청 관련", "슬랙 초대링크 관련", "참가 신청 메시지 관련", "슬랙 이메일 변경", "모집 기간 관련"],
+
+    "보증금 관련": ["보증금 관련", "멤버쉽/보증금 제도 관련", "멤버쉽/보증금 확인 관련"],
+
+    "회고 및 댓글 작성 관련": ["회고 및 댓글 작성 관련", "메모어 슬랙 사용 가이드", "회고/댓글 제출 가이드"],
+
+    "모임 관련": ["모임 관련", "모임 편성 관련", "모임 변경 관련", "오프라인 모임 장소 관련", "오프라인 및 온라인 비용"],
+
+    "취소/환불 관련": ["취소/환불 관련"],
+
+    "메모어라이브 관련": ["메모어라이브 관련", "신청 확인", "참가 조건"],
+
+    "메모어아카이빙 관련": ["메모어아카이빙 관련"],
+
+
+}
+
+def group_category(small_dict, big_dict):
+    for s_key, s_value in small_dict.items():
+        if s_value > 0:  # 값이 0보다 클 때만
+            for group_key, group_values in grouping.items():
+                if s_key in group_values:  
+                    big_dict[group_key] += s_value  
+                    break  
+    
+    return big_dict  
